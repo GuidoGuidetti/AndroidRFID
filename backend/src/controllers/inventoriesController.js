@@ -147,30 +147,22 @@ exports.getStats = async (req, res) => {
 
 /**
  * POST /api/inventories
- * Crea un nuovo inventario
+ * Crea un nuovo inventario (inv_id auto-generato dal database)
  */
 exports.create = async (req, res) => {
   try {
-    const { invId, name, note, placeId, userId } = req.body;
+    const { name, note, placeId } = req.body;
 
-    // Validazione input
-    if (!invId || !name || !placeId || !userId) {
+    // Validazione input (invId e userId non richiesti)
+    if (!name || !placeId) {
       return res.status(400).json({
-        error: 'invId, name, placeId, and userId are required'
+        error: 'name and placeId are required'
       });
     }
 
-    console.log(`Creating inventory: ${invId} for place ${placeId} by user ${userId}`);
+    console.log(`Creating inventory '${name}' for place ${placeId}`);
 
-    // Verifica che l'inventario non esista già
-    const existing = await Inventory.findById(invId);
-    if (existing) {
-      return res.status(409).json({
-        error: 'Inventory ID already exists'
-      });
-    }
-
-    const inventory = await Inventory.create({ invId, name, note, placeId, userId });
+    const inventory = await Inventory.create({ name, note, placeId });
 
     res.status(201).json({
       success: true,
@@ -179,6 +171,7 @@ exports.create = async (req, res) => {
   } catch (error) {
     console.error('Error creating inventory:', error);
     res.status(500).json({
+      success: false,
       error: 'Failed to create inventory',
       details: error.message
     });
@@ -187,7 +180,7 @@ exports.create = async (req, res) => {
 
 /**
  * PUT /api/inventories/:invId/state
- * Aggiorna lo stato di un inventario (open/closed)
+ * Aggiorna lo stato di un inventario (OPEN/CLOSE)
  */
 exports.updateState = async (req, res) => {
   try {
@@ -195,9 +188,9 @@ exports.updateState = async (req, res) => {
     const { state } = req.body;
 
     // Validazione stato
-    if (!state || !['open', 'closed'].includes(state)) {
+    if (!state || !['OPEN', 'CLOSE', 'open', 'closed'].includes(state)) {
       return res.status(400).json({
-        error: 'Valid state required (open or closed)'
+        error: 'Valid state required (OPEN or CLOSE)'
       });
     }
 
@@ -219,6 +212,37 @@ exports.updateState = async (req, res) => {
     console.error('Error updating inventory state:', error);
     res.status(500).json({
       error: 'Failed to update inventory state',
+      details: error.message
+    });
+  }
+};
+
+/**
+ * PUT /api/inventories/:invId/close
+ * Chiudi un inventario (imposta stato a CLOSE)
+ */
+exports.closeInventory = async (req, res) => {
+  try {
+    const { invId } = req.params;
+
+    console.log(`Closing inventory ${invId}`);
+
+    const inventory = await Inventory.updateState(invId, 'CLOSE');
+
+    if (!inventory) {
+      return res.status(404).json({
+        error: 'Inventory not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      inventory
+    });
+  } catch (error) {
+    console.error('Error closing inventory:', error);
+    res.status(500).json({
+      error: 'Failed to close inventory',
       details: error.message
     });
   }
@@ -261,7 +285,7 @@ exports.update = async (req, res) => {
 exports.addScan = async (req, res) => {
   try {
     const { invId } = req.params;
-    const { epc, mode, placeId, zoneId } = req.body;
+    const { epc, mode, placeId, zoneId, productFilters } = req.body;
 
     // Validazione
     if (!epc) {
@@ -282,6 +306,13 @@ exports.addScan = async (req, res) => {
       if (!exists) {
         console.log(`EPC ${epc} non censito - skipped (mode_a)`);
         shouldAddToInventory = false;
+      } else if (productFilters && Object.keys(productFilters).length > 0) {
+        // NUOVO: Applicare filtri prodotto se mode_a è attivo
+        const productMatches = await Item.matchesProductFilters(epc, productFilters);
+        if (!productMatches) {
+          console.log(`EPC ${epc} filtered by product filters:`, productFilters);
+          shouldAddToInventory = false;
+        }
       }
     } else if (mode === 'mode_b') {
       // Tutti i tags con registrazione dei non censiti

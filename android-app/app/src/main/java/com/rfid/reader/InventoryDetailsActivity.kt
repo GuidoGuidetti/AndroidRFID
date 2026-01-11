@@ -17,7 +17,7 @@ import kotlinx.coroutines.launch
 class InventoryDetailsActivity : AppCompatActivity() {
     private lateinit var binding: ActivityInventoryDetailsBinding
     private lateinit var adapter: InventoryDetailsAdapter
-    private var inventoryId: String = ""
+    private var inventoryId: Int = 0
     private var inventoryName: String = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -25,7 +25,7 @@ class InventoryDetailsActivity : AppCompatActivity() {
         binding = ActivityInventoryDetailsBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        inventoryId = intent.getStringExtra("INVENTORY_ID") ?: ""
+        inventoryId = intent.getIntExtra("INVENTORY_ID", 0)
         inventoryName = intent.getStringExtra("INVENTORY_NAME") ?: ""
 
         android.util.Log.d(TAG, "Opening details for inventory: $inventoryId ($inventoryName)")
@@ -118,6 +118,15 @@ class InventoryDetailsAdapter : RecyclerView.Adapter<InventoryDetailsAdapter.Vie
 
         fun bind(item: InventoryItemDetail) {
             binding.tvProductId.text = item.product_id ?: "N/A"
+            
+            // Abilita copia su click lungo per Product ID
+            binding.tvProductId.setOnLongClickListener {
+                val clipboard = it.context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                val clip = android.content.ClipData.newPlainText("Product ID", item.product_id)
+                clipboard.setPrimaryClip(clip)
+                android.widget.Toast.makeText(it.context, "Product ID copiato", android.widget.Toast.LENGTH_SHORT).show()
+                true
+            }
 
             // fld01 - nasconde se vuoto
             if (!item.fld01.isNullOrBlank()) {

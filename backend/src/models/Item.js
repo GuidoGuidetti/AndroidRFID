@@ -101,6 +101,38 @@ class Item {
     );
     return result.rows;
   }
+
+  /**
+   * Verifica se un EPC corrisponde ai filtri prodotto specificati
+   * @param {string} epc - EPC del tag
+   * @param {Object} filters - Mappa campo -> valore (es. {fld01: "valore", fldd01: "test"})
+   * @returns {Promise<boolean>} - true se corrisponde ai filtri, false altrimenti
+   */
+  static async matchesProductFilters(epc, filters) {
+    try {
+      // JOIN Items -> Products per ottenere i campi prodotto
+      const filterConditions = Object.keys(filters).map((field, index) => {
+        return `p.${field} ILIKE $${index + 2}`;  // ILIKE = case-insensitive LIKE
+      }).join(' AND ');
+
+      const filterValues = Object.values(filters).map(value => `%${value}%`);  // "contiene"
+
+      const query = `
+        SELECT COUNT(*) as count
+        FROM "Items" i
+        INNER JOIN "Products" p ON i.item_product_id = p.product_id
+        WHERE i.item_id = $1 AND ${filterConditions}
+      `;
+
+      const result = await pool.query(query, [epc, ...filterValues]);
+      const count = parseInt(result.rows[0].count);
+
+      return count > 0;
+    } catch (error) {
+      console.error('Error checking product filters:', error);
+      return false;  // In caso di errore, non filtrare (comportamento safe)
+    }
+  }
 }
 
 module.exports = Item;

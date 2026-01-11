@@ -185,6 +185,47 @@
                 android:layout_marginStart="8dp" />
         </LinearLayout>
 
+        <!-- Beep Volume Section -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Beep Volume"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:padding="16dp"
+            android:background="#F0F0F0"
+            android:layout_marginTop="16dp" />
+
+        <RadioGroup
+            android:id="@+id/rgBeepVolume"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="16dp"
+            android:orientation="horizontal">
+
+            <RadioButton
+                android:id="@+id/rbBeepLow"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Basso" />
+
+            <RadioButton
+                android:id="@+id/rbBeepMedium"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Medio"
+                android:checked="true" />
+
+            <RadioButton
+                android:id="@+id/rbBeepHigh"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Alto" />
+        </RadioGroup>
+
         <!-- Inventory Zone Section -->
         <TextView
             android:layout_width="match_parent"

@@ -63,7 +63,10 @@
       "Bash(powershell.exe -Command \"Set-Location ''C:\\\\_RFID\\\\Android_RFID\\\\backend''; node check_inventories.js\")",
       "Bash(powershell.exe -Command \"Get-Content ''C:\\\\Users\\\\ACER\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C---RFID-Android-RFID\\\\tasks\\\\bd830bd.output'' -Tail 100\")",
       "Bash(powershell.exe -Command \"Get-Content ''C:\\\\Users\\\\ACER\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C---RFID-Android-RFID\\\\tasks\\\\bd830bd.output'' -Tail 100 | Select-String -Pattern ''Adding scan|already exists|added to inventory'' -Context 0,1\")",
-      "Bash(./gradlew installDebug:*)"
+      "Bash(./gradlew installDebug:*)",
+      "Bash(./gradlew.bat assembleDebug)",
+      "Bash(./gradlew.bat clean assembleDebug)",
+      "Bash(ls:*)"
     ]
   }
 }

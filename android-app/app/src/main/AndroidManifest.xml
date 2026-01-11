@@ -60,6 +60,14 @@
             android:exported="false"
             android:screenOrientation="portrait" />
 
+        <!-- New Inventory -->
+        <activity
+            android:name=".NewInventoryActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:label="Nuovo Inventario"
+            android:parentActivityName=".InventoryListActivity" />
+
         <!-- Inventory Scan (ex MainActivity) -->
         <activity
             android:name=".InventoryScanActivity"
@@ -78,6 +86,43 @@
             android:name=".InventoryDetailsActivity"
             android:exported="false"
             android:screenOrientation="portrait" />
+
+        <!-- Inventory Settings -->
+        <activity
+            android:name=".InventorySettingsActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:label="Inventory Settings"
+            android:parentActivityName=".InventoryScanActivity" />
+
+        <!-- Tag Info -->
+        <activity
+            android:name=".TagInfoActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:label="Tag Info" />
+
+        <activity
+            android:name=".TagDetailActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:label="Tag Details" />
+
+        <!-- Locate Tag -->
+        <activity
+            android:name=".LocateActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:label="Locate Tag"
+            android:parentActivityName=".MainActivity" />
+
+        <!-- RSSI Monitor -->
+        <activity
+            android:name=".RssiMonitorActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:label="RSSI Monitor"
+            android:parentActivityName=".LocateActivity" />
 
         <!-- Old MainActivity (kept for backward compatibility) -->
         <activity

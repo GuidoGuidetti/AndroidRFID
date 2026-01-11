@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.rfid.reader.network.RetrofitClient
 import com.rfid.reader.network.ScanToInventoryRequest
 import com.rfid.reader.rfid.RFIDManager
+import com.rfid.reader.utils.BeepHelper
 import com.rfid.reader.utils.SettingsManager
 import com.rfid.reader.utils.SessionManager
 import kotlinx.coroutines.launch
@@ -17,12 +18,13 @@ import kotlinx.coroutines.launch
  * Gestisce la scansione RFID e l'invio dei tag a un inventario specifico
  */
 class InventoryScanViewModel(application: Application) : AndroidViewModel(application) {
-    private val rfidManager = RFIDManager(application)
+    private val rfidManager = RFIDManager.getInstance(application)
     private val apiService = RetrofitClient.apiService
     private val settingsManager = SettingsManager(application)
     private val sessionManager = SessionManager(application)
+    private val beepHelper = BeepHelper.getInstance(application)
 
-    private var currentInventoryId: String = ""
+    private var currentInventoryId: Int = 0
     private val scannedEpcs = mutableSetOf<String>() // Track EPCs scannati in questa sessione
 
     // Contatore totale tag unici letti (esistenti + nuovi)
@@ -54,7 +56,7 @@ class InventoryScanViewModel(application: Application) : AndroidViewModel(applic
     /**
      * Imposta l'inventario corrente e carica il count esistente dal DB
      */
-    fun setInventory(inventoryId: String) {
+    fun setInventory(inventoryId: Int) {
         currentInventoryId = inventoryId
         android.util.Log.d(TAG, "Inventory set to: $inventoryId")
         loadExistingCount()
@@ -167,6 +169,10 @@ class InventoryScanViewModel(application: Application) : AndroidViewModel(applic
                     if (!scannedEpcs.contains(epc)) {
                         android.util.Log.d(TAG, "New unique tag detected: $epc (RSSI: $rssi)")
                         scannedEpcs.add(epc)
+
+                        // ✅ Beep SOLO su nuovo EPC rilevato
+                        beepHelper.playBeep()
+
                         sendTagToInventory(epc)
                     }
                 }
@@ -184,14 +190,22 @@ class InventoryScanViewModel(application: Application) : AndroidViewModel(applic
                 val placeId = sessionManager.getUserPlace()
                 val zoneId = settingsManager.getInventoryZone()
 
-                android.util.Log.d(TAG, "Sending tag $epc to inventory $currentInventoryId (mode: $mode, place: $placeId, zone: $zoneId)")
+                // NUOVO: Ottieni filtri prodotto attivi (solo se mode_a)
+                val productFilters = if (mode == "mode_a") {
+                    settingsManager.getActiveProductFilters()
+                } else {
+                    null
+                }
+
+                android.util.Log.d(TAG, "Sending tag $epc to inventory $currentInventoryId (mode: $mode, filters: $productFilters)")
                 val response = apiService.addScanToInventory(
                     currentInventoryId,
                     ScanToInventoryRequest(
                         epc = epc,
                         mode = mode,
                         placeId = placeId,
-                        zoneId = zoneId
+                        zoneId = zoneId,
+                        productFilters = productFilters  // NUOVO
                     )
                 )
 
@@ -276,6 +290,67 @@ class InventoryScanViewModel(application: Application) : AndroidViewModel(applic
             stopScan()
         } else {
             startScan()
+        }
+    }
+
+    /**
+     * Svuota l'inventario eliminando tutti gli items
+     */
+    suspend fun clearInventory() {
+        try {
+            val response = apiService.clearInventory(currentInventoryId)
+
+            if (response.success) {
+                // Azzerare counter
+                _totalTagsCount.postValue(0)
+                initialInventoryCount = 0
+
+                // Resettare lista tag scannati in questa sessione
+                scannedEpcs.clear()
+
+                android.util.Log.d(TAG, "Inventory $currentInventoryId cleared successfully. ${response.itemsRemoved} items removed.")
+            } else {
+                throw Exception("Failed to clear inventory: ${response.message}")
+            }
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "Error clearing inventory", e)
+            throw e
+        }
+    }
+
+    /**
+     * Chiude l'inventario impostando lo stato a CLOSE
+     */
+    suspend fun closeInventory() {
+        try {
+            val response = apiService.closeInventory(currentInventoryId)
+
+            if (response.success) {
+                android.util.Log.d(TAG, "Inventory $currentInventoryId closed successfully")
+            } else {
+                throw Exception("Failed to close inventory")
+            }
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "Error closing inventory", e)
+            throw e
+        }
+    }
+
+    /**
+     * Elimina l'inventario e tutti gli items associati
+     */
+    suspend fun deleteInventory() {
+        try {
+            val response = apiService.deleteInventory(currentInventoryId)
+
+            if (response.success) {
+                android.util.Log.d(TAG, "Inventory $currentInventoryId deleted successfully")
+            } else {
+                throw Exception("Failed to delete inventory: ${response.message}")
+            }
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "Error deleting inventory", e)
+            throw e
         }
     }
 

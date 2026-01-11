@@ -11,10 +11,15 @@ android {
         applicationId "com.rfid.reader"
         minSdk 26  // Richiesto da Zebra RFID SDK
         targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        versionCode 2
+        versionName "2.1.1"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+
+        // Genera timestamp build automatico
+        def buildTime = new Date().format("yyyyMMdd-HHmm")
+        resValue "string", "build_timestamp", buildTime
+        resValue "string", "app_full_version", "v${versionName} - Build: ${buildTime}"
 
         // Configurazione per gestire manifest merge conflicts
         manifestPlaceholders = [

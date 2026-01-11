@@ -8,6 +8,9 @@ router.get('/', itemsController.getAllItems);
 // GET /api/items/:epc - Ottieni item specifico per EPC
 router.get('/:epc', itemsController.getItemByEpc);
 
+// GET /api/items/:epc/history - Ottieni storico movimenti per EPC
+router.get('/:epc/history', itemsController.getItemHistory);
+
 // GET /api/items/place/:placeId - Ottieni items per place
 router.get('/place/:placeId', itemsController.getItemsByPlace);
 

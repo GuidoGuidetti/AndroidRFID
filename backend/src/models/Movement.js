@@ -57,6 +57,25 @@ class Movement {
     return result.rows;
   }
 
+  // Get full history by EPC with joins
+  static async findHistoryByEpc(epc, limit = 100) {
+    const result = await pool.query(
+      `SELECT m.*,
+        p.place_name,
+        z.zone_name,
+        mr.mref_description as reference_desc
+       FROM "Movements" m
+       LEFT JOIN "Places" p ON m.mov_dest_place = p.place_id
+       LEFT JOIN "Zones" z ON m.mov_dest_zone = z.zone_id
+       LEFT JOIN "movements_reference" mr ON m.mov_mref_id = mr.mref_id
+       WHERE m.mov_epc = $1
+       ORDER BY m.mov_timestamp DESC
+       LIMIT $2`,
+      [epc, limit]
+    );
+    return result.rows;
+  }
+
   // Get recent movements
   static async findRecent(limit = 100, offset = 0) {
     const result = await pool.query(

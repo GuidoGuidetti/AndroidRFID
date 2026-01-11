@@ -99,6 +99,25 @@ class SettingsActivity : AppCompatActivity() {
             Toast.makeText(this, "Filtro EPC salvato: $prefix", Toast.LENGTH_SHORT).show()
             android.util.Log.d(TAG, "EPC prefix filter set to: $prefix")
         }
+
+        // Beep Volume Radio Group
+        when (settingsManager.getBeepVolume()) {
+            "low" -> binding.rbBeepLow.isChecked = true
+            "medium" -> binding.rbBeepMedium.isChecked = true
+            "high" -> binding.rbBeepHigh.isChecked = true
+        }
+
+        binding.rgBeepVolume.setOnCheckedChangeListener { _, checkedId ->
+            val volume = when (checkedId) {
+                R.id.rbBeepLow -> "low"
+                R.id.rbBeepMedium -> "medium"
+                R.id.rbBeepHigh -> "high"
+                else -> "medium"
+            }
+            settingsManager.setBeepVolume(volume)
+            android.util.Log.d(TAG, "Beep volume set to: $volume")
+            Toast.makeText(this, "Volume beep: $volume", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun loadZones() {

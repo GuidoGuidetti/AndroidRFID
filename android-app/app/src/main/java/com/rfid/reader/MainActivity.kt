@@ -1,6 +1,7 @@
 package com.rfid.reader
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -16,6 +17,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var viewModel: RFIDViewModel
 
     companion object {
+        private const val TAG = "MainActivity"
         private const val PERMISSION_REQUEST_CODE = 100
     }
 
@@ -80,6 +82,11 @@ class MainActivity : AppCompatActivity() {
                 viewModel.startScan()
             }
         }
+
+        binding.btnLocate.setOnClickListener {
+            val intent = Intent(this, LocateActivity::class.java)
+            startActivity(intent)
+        }
     }
 
     private fun checkPermissions() {
@@ -119,6 +126,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        android.util.Log.d(TAG, "Activity destroying, disconnecting reader")
         viewModel.disconnectReader()
     }
 }

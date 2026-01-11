@@ -4,19 +4,37 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.content.Context
 import android.util.Log
+import com.rfid.reader.utils.BeepHelper
+import com.rfid.reader.utils.SettingsManager
 import com.zebra.rfid.api3.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
-class RFIDManager(private val context: Context) {
+class RFIDManager private constructor(private val context: Context) {
     private var readers: Readers? = null
     private var rfidReader: RFIDReader? = null
+    private var currentEventsListener: RfidEventsListener? = null
+    private val settingsManager = SettingsManager(context)
+    private val beepHelper = BeepHelper.getInstance(context)
+
+    private var pollingJob: kotlinx.coroutines.Job? = null
+    private val scope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
 
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
     val connectionState: StateFlow<ConnectionState> = _connectionState
 
     private val _tags = MutableStateFlow<List<TagData>>(emptyList())
     val tags: StateFlow<List<TagData>> = _tags
+    
+    private val _tagReadFlow = kotlinx.coroutines.flow.MutableSharedFlow<List<TagData>>(
+        replay = 0,
+        extraBufferCapacity = 100,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST
+    )
+    val tagReadFlow: kotlinx.coroutines.flow.SharedFlow<List<TagData>> = _tagReadFlow
 
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage
@@ -28,11 +46,23 @@ class RFIDManager(private val context: Context) {
         DISCONNECTED, CONNECTING, CONNECTED, ERROR
     }
 
+    companion object {
+        private const val TAG = "RFIDManager"
+        
+        @Volatile
+        private var INSTANCE: RFIDManager? = null
+
+        fun getInstance(context: Context): RFIDManager {
+            return INSTANCE ?: synchronized(this) {
+                INSTANCE ?: RFIDManager(context.applicationContext).also { INSTANCE = it }
+            }
+        }
+    }
+
     init {
         try {
             Log.d(TAG, "Initializing Readers with BLUETOOTH transport")
             readers = Readers(context, ENUM_TRANSPORT.BLUETOOTH)
-            Log.d(TAG, "Readers initialized successfully")
         } catch (e: Exception) {
             Log.e(TAG, "Error initializing Readers", e)
         }
@@ -44,357 +74,281 @@ class RFIDManager(private val context: Context) {
             if (bluetoothAdapter == null) {
                 Log.e(TAG, "BluetoothAdapter is null")
                 emptyList()
+            } else if (!bluetoothAdapter.isEnabled) {
+                Log.e(TAG, "Bluetooth is disabled")
+                emptyList()
             } else {
                 val pairedDevices = bluetoothAdapter.bondedDevices
                 Log.d(TAG, "Found ${pairedDevices.size} paired Bluetooth devices")
                 pairedDevices.forEach { device ->
-                    Log.d(TAG, "Paired device: ${device.name} (${device.address})")
+                    Log.d(TAG, "Device: ${device.name} - ${device.address}")
                 }
-                pairedDevices.filter { it.name?.startsWith("RFD", ignoreCase = true) == true }
+                // Filtro più permissivo: cerca RFD o dispositivi Zebra
+                pairedDevices.filter { 
+                    val name = it.name ?: ""
+                    name.contains("RFD", ignoreCase = true) || name.contains("Zebra", ignoreCase = true)
+                }
             }
-        } catch (e: SecurityException) {
-            Log.e(TAG, "Security exception getting paired devices - missing BLUETOOTH_CONNECT permission?", e)
-            emptyList()
         } catch (e: Exception) {
-            Log.e(TAG, "Error getting paired Bluetooth devices", e)
+            Log.e(TAG, "Error getting paired devices", e)
             emptyList()
         }
     }
 
-    fun getAvailableReaders(): List<ReaderDevice> {
-        return try {
-            val availableReaders = readers?.GetAvailableRFIDReaderList() ?: emptyList()
-            Log.d(TAG, "Found ${availableReaders.size} available readers")
-            availableReaders.forEachIndexed { index, reader ->
-                Log.d(TAG, "Reader $index: ${reader.name}")
-            }
-            availableReaders
-        } catch (e: Exception) {
-            Log.e(TAG, "Error getting available readers", e)
-            emptyList()
-        }
-    }
-
-    fun connectToReader(readerDevice: ReaderDevice? = null) {
+    suspend fun connectToReader(readerDevice: ReaderDevice? = null) = withContext(Dispatchers.IO) {
         try {
+            // Verifica se già connesso MA reinizializza sempre gli event handlers
+            if (_connectionState.value == ConnectionState.CONNECTED && rfidReader?.isConnected == true) {
+                Log.d(TAG, "Reader already connected, reinstalling event handlers...")
+                setupEventHandlers() // ✅ REINSTALLA SEMPRE gli handler
+                return@withContext
+            }
+
             Log.d(TAG, "Starting connection process")
             _connectionState.value = ConnectionState.CONNECTING
             _errorMessage.value = null
 
-            // Verifica prima che ci siano dispositivi Bluetooth paired
+            // Assicurati che l'oggetto Readers sia pronto
+            if (readers == null) {
+                readers = Readers(context, ENUM_TRANSPORT.BLUETOOTH)
+            }
+
             val pairedDevices = getPairedBluetoothDevices()
             if (pairedDevices.isEmpty()) {
-                val error = "Nessun reader RFD trovato nei dispositivi Bluetooth paired.\n" +
-                        "1. Accendi il reader RFD8500\n" +
-                        "2. Vai in Impostazioni → Bluetooth\n" +
-                        "3. Associa il reader (cerca RFD8500...)"
+                val error = "Nessun reader RFD/Zebra trovato nei dispositivi paired. Verifica Bluetooth e associazione."
                 Log.e(TAG, error)
                 _errorMessage.value = error
                 _connectionState.value = ConnectionState.ERROR
-                return
+                return@withContext
             }
 
-            Log.d(TAG, "Found ${pairedDevices.size} paired RFD devices")
-
-            // Tentativo di ottenere available readers dall'SDK
-            // Retry con delays perché l'SDK potrebbe non essere pronto
             var availableReaders: List<ReaderDevice> = emptyList()
-            var lastError: Exception? = null
-
             for (attempt in 1..3) {
                 try {
                     Log.d(TAG, "Attempt $attempt to get available readers...")
-                    Thread.sleep(500L * attempt) // Delay incrementale
                     availableReaders = readers?.GetAvailableRFIDReaderList() ?: emptyList()
-                    if (availableReaders.isNotEmpty()) {
-                        Log.d(TAG, "Found ${availableReaders.size} readers on attempt $attempt")
-                        break
+                    if (availableReaders.isNotEmpty()) break
+                    
+                    // Se non trova nulla, prova a reinizializzare l'SDK
+                    if (attempt == 2) {
+                        Log.d(TAG, "Re-initializing Readers object...")
+                        readers?.Dispose()
+                        readers = Readers(context, ENUM_TRANSPORT.BLUETOOTH)
                     }
+                    kotlinx.coroutines.delay(1000L) 
                 } catch (e: Exception) {
-                    lastError = e
                     Log.w(TAG, "Attempt $attempt failed: ${e.message}")
                 }
             }
 
             if (availableReaders.isEmpty()) {
-                val error = "SDK non riesce a trovare il reader.\n" +
-                        "Il reader è paired come '${pairedDevices.first().name}'\n" +
-                        "Prova a:\n" +
-                        "1. Spegnere e riaccendere il reader\n" +
-                        "2. Riavviare l'app\n" +
-                        "Errore SDK: ${lastError?.message}"
-                Log.e(TAG, error, lastError)
+                val error = "SDK Zebra non rileva il reader. Prova a spegnere/riaccendere il Bluetooth del telefono."
                 _errorMessage.value = error
                 _connectionState.value = ConnectionState.ERROR
-                return
+                return@withContext
             }
 
-            val reader = readerDevice ?: availableReaders.firstOrNull()!!
-            connectViaReaderDevice(reader)
-        } catch (e: InvalidUsageException) {
-            val error = "SDK Error: ${e.vendorMessage}"
-            Log.e(TAG, error, e)
-            _errorMessage.value = error
-            _connectionState.value = ConnectionState.ERROR
-        } catch (e: OperationFailureException) {
-            val details = """
-                Connessione fallita al reader RFD8500
-                StatusDescription: ${e.statusDescription}
-                VendorMessage: ${e.vendorMessage}
-                Results: ${e.results}
+            val reader = readerDevice ?: availableReaders.first()
+            Log.d(TAG, "Connecting to: ${reader.name}")
+            rfidReader = reader.getRFIDReader()
+            
+            if (rfidReader == null) throw Exception("Impossibile ottenere istanza RFIDReader dall'SDK")
 
-                Possibili cause:
-                1. Reader in sleep mode - Premi il trigger per svegliarlo
-                2. Reader già connesso a un'altra app (es. 123RFID)
-                3. Reader spento o batteria scarica
-
-                Soluzione:
-                - Premi il trigger sul reader RFD8500
-                - Chiudi altre app RFID Zebra
-                - Riprova la connessione
-            """.trimIndent()
-            Log.e(TAG, "OperationFailureException details:", e)
-            Log.e(TAG, "StatusDescription: ${e.statusDescription}")
-            Log.e(TAG, "VendorMessage: ${e.vendorMessage}")
-            Log.e(TAG, "Results: ${e.results}")
-            _errorMessage.value = details
-            _connectionState.value = ConnectionState.ERROR
-        } catch (e: Exception) {
-            val error = "Errore: ${e.message}"
-            Log.e(TAG, error, e)
-            _errorMessage.value = error
-            _connectionState.value = ConnectionState.ERROR
-        }
-    }
-
-    private fun connectViaReaderDevice(reader: ReaderDevice) {
-        Log.d(TAG, "Connecting via ReaderDevice: ${reader.name}")
-        Log.d(TAG, "Reader transport type: ${reader.transport}")
-        Log.d(TAG, "Reader password: ${reader.password}")
-
-        rfidReader = reader.getRFIDReader()
-
-        if (rfidReader == null) {
-            val error = "getRFIDReader() returned null"
-            Log.e(TAG, error)
-            _errorMessage.value = error
-            _connectionState.value = ConnectionState.ERROR
-            return
-        }
-
-        Log.d(TAG, "RFIDReader instance obtained")
-
-        // CRITICAL: Aspetta che l'SDK completi l'inizializzazione interna
-        Log.d(TAG, "Waiting for SDK internal initialization...")
-        Thread.sleep(500L)
-        Log.d(TAG, "Wait complete, attempting connection")
-
-        Log.d(TAG, "IsConnected before connect: ${rfidReader!!.isConnected}")
-
-        if (!rfidReader!!.isConnected) {
-            Log.d(TAG, "Calling connect()...")
-
-            // Prova la connessione - l'OperationFailureException potrebbe dare dettagli
-            try {
+            if (!rfidReader!!.isConnected) {
                 rfidReader?.connect()
-                Log.d(TAG, "connect() returned successfully!")
-                Log.d(TAG, "isConnected: ${rfidReader!!.isConnected}")
-
-                if (!rfidReader!!.isConnected) {
-                    Log.w(TAG, "connect() succeeded but isConnected still false - SDK might need more time")
-                    Thread.sleep(250L)
-                    Log.d(TAG, "After additional wait, isConnected: ${rfidReader!!.isConnected}")
-                }
-            } catch (e: OperationFailureException) {
-                // Log dettagli e re-throw
-                Log.e(TAG, "connect() threw OperationFailureException")
-                Log.e(TAG, "StatusDescription: ${e.statusDescription}")
-                Log.e(TAG, "VendorMessage: ${e.vendorMessage}")
-                throw e
             }
-        } else {
-            Log.d(TAG, "Reader already connected")
+
+            // Configurazione post-connessione
+            setupEventHandlers()
+            configureReader()
+
+            _connectionState.value = ConnectionState.CONNECTED
+            Log.d(TAG, "Reader connected successfully: ${reader.name}")
+
+            // ✅ Beep doppio per conferma connessione
+            beepHelper.playDoubleBeep()
+        } catch (e: Exception) {
+            Log.e(TAG, "Connection error", e)
+            val msg = if (e is OperationFailureException) e.statusDescription else e.message
+            _errorMessage.value = "Errore: $msg"
+            _connectionState.value = ConnectionState.ERROR
         }
-
-        setupEventHandlers()
-        configureReader()
-
-        _connectionState.value = ConnectionState.CONNECTED
-        Log.d(TAG, "Reader configured and ready")
-    }
-
-
-    companion object {
-        private const val TAG = "RFIDManager"
     }
 
     private fun configureReader() {
         rfidReader?.let { reader ->
             try {
-                // Configurazione base - SDK 2.0 ha API diverse
                 val config = reader.Config
-
-                // Configura potenza antenna
+                // Antenna
                 val antennaConfig = config.Antennas.getAntennaRfConfig(1)
-                antennaConfig.setTransmitPowerIndex(270) // Max power
+                antennaConfig.setTransmitPowerIndex(270)
                 antennaConfig.setrfModeTableIndex(0)
                 config.Antennas.setAntennaRfConfig(1, antennaConfig)
 
-                // TODO: Configurazione session - richiede studio API SDK 2.0
-                // Le API Singulation sono cambiate nella versione 2.0
+                // Singulation (Session S0 per Geiger)
+                val singulationControl = config.Antennas.getSingulationControl(1)
+                singulationControl.session = SESSION.SESSION_S0
+                singulationControl.Action.inventoryState = INVENTORY_STATE.INVENTORY_STATE_A
+                singulationControl.Action.slFlag = SL_FLAG.SL_ALL
+                config.Antennas.setSingulationControl(1, singulationControl)
+
+                config.setDPOState(DYNAMIC_POWER_OPTIMIZATION.DISABLE)
+                config.setBatchMode(BATCH_MODE.DISABLE)
+
+                // ✅ DISABILITA completamente beep hardware del reader
+                // Il beep sarà gestito via software (BeepHelper) solo su eventi specifici
+                try {
+                    config.setBeeperVolume(BEEPER_VOLUME.QUIET_BEEP)
+                    Log.d(TAG, "Hardware beeper DISABLED (using software beep)")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Could not disable hardware beeper: ${e.message}")
+                }
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e(TAG, "Configuration error", e)
             }
         }
     }
 
     private fun setupEventHandlers() {
         try {
-            Log.d(TAG, "Setting up event handlers")
-            val events = rfidReader?.Events
-            if (events == null) {
-                Log.e(TAG, "rfidReader.Events is null!")
-                return
+            val events = rfidReader?.Events ?: return
+
+            // Rimuovi solo il listener precedente se esiste
+            if (currentEventsListener != null) {
+                Log.d(TAG, "Removing previous event listener")
+                events.removeEventsListener(currentEventsListener)
             }
 
-            Log.d(TAG, "Events object obtained, adding listeners")
-            events.addEventsListener(object : RfidEventsListener {
+            // Crea e registra nuovo listener
+            currentEventsListener = object : RfidEventsListener {
                 override fun eventReadNotify(e: RfidReadEvents?) {
-                    Log.d(TAG, "=== Tag read event received ===")
-
-                    // Nell'SDK 2.0, l'evento è solo una notifica
-                    // I dati del tag devono essere letti dal reader usando Actions
-                    try {
-                        // Legge fino a 1000 tag dalla memoria del reader
-                        val tagDataArray = rfidReader?.Actions?.getReadTags(1000)
-                        if (tagDataArray != null && tagDataArray.isNotEmpty()) {
-                            Log.d(TAG, "Got ${tagDataArray.size} tags from Actions.getReadTags()")
-                            tagDataArray.forEach { tag ->
-                                Log.d(TAG, "Tag: EPC=${tag.tagID}, RSSI=${tag.peakRSSI}")
+                    scope.launch {
+                        try {
+                            val tagDataArray = rfidReader?.Actions?.getReadTags(500)
+                            if (tagDataArray != null && tagDataArray.isNotEmpty()) {
+                                handleTagRead(tagDataArray)
                             }
-                            handleTagRead(tagDataArray)
-                        } else {
-                            Log.w(TAG, "No tags returned from Actions.getReadTags()")
-                        }
-                    } catch (ex: Exception) {
-                        Log.e(TAG, "Error reading tags from Actions", ex)
-                        ex.printStackTrace()
+                        } catch (ex: Exception) {}
                     }
                 }
 
                 override fun eventStatusNotify(e: RfidStatusEvents?) {
-                    Log.d(TAG, "Status event received")
                     e?.StatusEventData?.let { statusData ->
-                        Log.d(TAG, "Status event data: $statusData")
-
-                        // Gestione trigger press/release
                         if (statusData.HandheldTriggerEventData != null) {
                             val triggerEvent = statusData.HandheldTriggerEventData.handheldEvent
-                            Log.d(TAG, "Trigger event: $triggerEvent")
-
-                            when (triggerEvent) {
-                                HANDHELD_TRIGGER_EVENT_TYPE.HANDHELD_TRIGGER_PRESSED -> {
-                                    Log.d(TAG, "Trigger PRESSED")
-                                    _triggerPressed.value = true
-                                }
-                                HANDHELD_TRIGGER_EVENT_TYPE.HANDHELD_TRIGGER_RELEASED -> {
-                                    Log.d(TAG, "Trigger RELEASED")
-                                    _triggerPressed.value = false
-                                }
-                                else -> {
-                                    Log.d(TAG, "Unknown trigger event: $triggerEvent")
-                                }
-                            }
+                            val isPressed = (triggerEvent == HANDHELD_TRIGGER_EVENT_TYPE.HANDHELD_TRIGGER_PRESSED)
+                            Log.d(TAG, "Trigger event: $triggerEvent, pressed: $isPressed")
+                            _triggerPressed.value = isPressed
                         }
                     }
-                    // Gestione eventi di status (disconnessione, errori, etc)
                 }
-            })
-            Log.d(TAG, "Event listeners added successfully")
-
-            // CRITICAL: Nell'SDK 2.0, gli eventi devono essere abilitati esplicitamente
-            Log.d(TAG, "Enabling tag read events...")
-            try {
-                events.setTagReadEvent(true)
-                Log.d(TAG, "Tag read events enabled")
-            } catch (e: Exception) {
-                Log.e(TAG, "Error enabling tag read events", e)
             }
 
-            // Abilita eventi trigger
-            Log.d(TAG, "Enabling handheld trigger events...")
-            try {
-                events.setHandheldEvent(true)
-                Log.d(TAG, "Handheld trigger events enabled")
-            } catch (e: Exception) {
-                Log.e(TAG, "Error enabling handheld trigger events", e)
-            }
+            events.addEventsListener(currentEventsListener)
+            events.setTagReadEvent(true)
+            events.setHandheldEvent(true)
+            Log.d(TAG, "Event handlers installed successfully")
         } catch (e: Exception) {
-            Log.e(TAG, "Error setting up event handlers", e)
-            e.printStackTrace()
+            Log.e(TAG, "Event handler error", e)
         }
     }
 
     private fun handleTagRead(tagDataArray: Array<TagData>) {
-        Log.d(TAG, "handleTagRead: Processing ${tagDataArray.size} tags")
         val currentTags = _tags.value.toMutableList()
-        Log.d(TAG, "handleTagRead: Current tags count: ${currentTags.size}")
+        var updated = false
+        _tagReadFlow.tryEmit(tagDataArray.toList())
 
         tagDataArray.forEach { tag ->
-            val existingTag = currentTags.find { it.tagID == tag.tagID }
-            if (existingTag == null) {
-                Log.d(TAG, "handleTagRead: Adding new tag: ${tag.tagID}")
+            val index = currentTags.indexOfFirst { it.tagID == tag.tagID }
+            if (index == -1) {
                 currentTags.add(tag)
+                updated = true
             } else {
-                Log.d(TAG, "handleTagRead: Tag already exists: ${tag.tagID}")
+                currentTags[index] = tag
+                updated = true
             }
         }
-
-        Log.d(TAG, "handleTagRead: Updating StateFlow with ${currentTags.size} tags")
-        _tags.value = currentTags
-        Log.d(TAG, "handleTagRead: StateFlow updated successfully")
+        if (updated) _tags.value = currentTags
     }
 
     fun startInventory() {
         try {
-            Log.d(TAG, "startInventory() called")
+            rfidReader?.Actions?.purgeTags()
             rfidReader?.Actions?.Inventory?.perform()
-            Log.d(TAG, "Inventory.perform() executed successfully")
+            startPolling()
         } catch (e: Exception) {
-            Log.e(TAG, "Error starting inventory", e)
-            e.printStackTrace()
+            Log.e(TAG, "Start inventory error", e)
+        }
+    }
+
+    private fun startPolling() {
+        pollingJob?.cancel()
+        pollingJob = scope.launch {
+            var emptyReads = 0
+            while (true) {
+                try {
+                    val tags = rfidReader?.Actions?.getReadTags(100)
+                    if (tags != null && tags.isNotEmpty()) {
+                        handleTagRead(tags)
+                        emptyReads = 0
+                    } else {
+                        emptyReads++
+                        // Aumentato threshold per maggiore tolleranza
+                        if (emptyReads > 20) {
+                            rfidReader?.Actions?.Inventory?.stop()
+                            kotlinx.coroutines.delay(100)
+                            rfidReader?.Actions?.purgeTags()
+                            rfidReader?.Actions?.Inventory?.perform()
+                            emptyReads = 0
+                        }
+                    }
+                } catch (e: Exception) {}
+                // Ridotto delay per maggiore fluidità RSSI (da 50ms a 30ms)
+                kotlinx.coroutines.delay(30)
+            }
         }
     }
 
     fun stopInventory() {
         try {
-            Log.d(TAG, "stopInventory() called")
+            pollingJob?.cancel()
             rfidReader?.Actions?.Inventory?.stop()
-            Log.d(TAG, "Inventory.stop() executed successfully")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error stopping inventory", e)
-            e.printStackTrace()
-        }
+            Thread.sleep(50)
+        } catch (e: Exception) {}
     }
 
     fun clearTags() {
-        Log.d(TAG, "clearTags() called - resetting tags list")
         _tags.value = emptyList()
-        Log.d(TAG, "Tags cleared, current count: ${_tags.value.size}")
+        try { rfidReader?.Actions?.purgeTags() } catch (e: Exception) {}
     }
 
     fun disconnect() {
         try {
             stopInventory()
+
+            // ✅ Pulisci event listeners prima della disconnessione
+            if (currentEventsListener != null && rfidReader != null) {
+                try {
+                    rfidReader?.Events?.removeEventsListener(currentEventsListener)
+                    Log.d(TAG, "Event listener removed before disconnect")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Could not remove event listener: ${e.message}")
+                }
+                currentEventsListener = null
+            }
+
             rfidReader?.disconnect()
             _connectionState.value = ConnectionState.DISCONNECTED
+            Log.d(TAG, "Reader disconnected successfully")
+
+            // ✅ Beep singolo per conferma disconnessione
+            beepHelper.playBeep()
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "Error during disconnect", e)
         }
     }
 
     fun dispose() {
-        disconnect()
-        readers?.Dispose()
+        stopInventory()
     }
 }

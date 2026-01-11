@@ -211,4 +211,19 @@
             </LinearLayout>
         </androidx.cardview.widget.CardView>
     </GridLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <TextView
+        android:id="@+id/tvVersion"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/app_full_version"
+        android:textSize="10sp"
+        android:textColor="#999999"
+        android:gravity="center"
+        android:padding="8dp" />
 </LinearLayout>

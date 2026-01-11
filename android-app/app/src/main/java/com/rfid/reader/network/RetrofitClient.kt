@@ -8,7 +8,7 @@ import java.util.concurrent.TimeUnit
 
 object RetrofitClient {
     // URL del backend - configurato per device fisico
-    private const val BASE_URL = "http://192.168.0.54:3000/"
+    private const val BASE_URL = "http://192.168.1.32:3000/"
     // Per emulatore Android usa: "http://10.0.2.2:3000/"
 
     private val loggingInterceptor = HttpLoggingInterceptor().apply {

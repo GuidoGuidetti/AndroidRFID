@@ -17,11 +17,23 @@ class SettingsManager(context: Context) {
         private const val KEY_MIN_RSSI = "min_rssi"
         private const val KEY_EPC_PREFIX_FILTER = "epc_prefix_filter"
         private const val KEY_INVENTORY_ZONE = "inventory_zone"
+        private const val KEY_BEEP_VOLUME = "beep_volume"
+
+        // Product filter keys
+        private const val KEY_FILTER_FLD01 = "filter_fld01"
+        private const val KEY_FILTER_FLD02 = "filter_fld02"
+        private const val KEY_FILTER_FLD03 = "filter_fld03"
+        private const val KEY_FILTER_FLDD01 = "filter_fldd01"
+        private const val KEY_FILTER_FLD01_ENABLED = "filter_fld01_enabled"
+        private const val KEY_FILTER_FLD02_ENABLED = "filter_fld02_enabled"
+        private const val KEY_FILTER_FLD03_ENABLED = "filter_fld03_enabled"
+        private const val KEY_FILTER_FLDD01_ENABLED = "filter_fldd01_enabled"
 
         // Default values
         const val DEFAULT_TAG_MODE = "mode_c" // All tags
         const val DEFAULT_POWER = 270
         const val DEFAULT_MIN_RSSI = -70
+        const val DEFAULT_BEEP_VOLUME = "medium" // low, medium, high
     }
 
     // Tag Reading Mode
@@ -43,4 +55,42 @@ class SettingsManager(context: Context) {
     // Inventory Zone
     fun getInventoryZone(): String? = prefs.getString(KEY_INVENTORY_ZONE, null)
     fun setInventoryZone(zone: String) = prefs.edit().putString(KEY_INVENTORY_ZONE, zone).apply()
+
+    // Beep Volume
+    fun getBeepVolume(): String = prefs.getString(KEY_BEEP_VOLUME, DEFAULT_BEEP_VOLUME) ?: DEFAULT_BEEP_VOLUME
+    fun setBeepVolume(volume: String) = prefs.edit().putString(KEY_BEEP_VOLUME, volume).apply()
+
+    // Product Filters
+    fun getProductFilter(field: String): String {
+        return prefs.getString("filter_$field", "") ?: ""
+    }
+
+    fun setProductFilter(field: String, value: String) {
+        prefs.edit().putString("filter_$field", value).apply()
+    }
+
+    fun isProductFilterEnabled(field: String): Boolean {
+        return prefs.getBoolean("filter_${field}_enabled", false)
+    }
+
+    fun setProductFilterEnabled(field: String, enabled: Boolean) {
+        prefs.edit().putBoolean("filter_${field}_enabled", enabled).apply()
+    }
+
+    // Get all active product filters as a map
+    fun getActiveProductFilters(): Map<String, String> {
+        val filters = mutableMapOf<String, String>()
+        val fields = listOf("fld01", "fld02", "fld03", "fldd01")
+
+        fields.forEach { field ->
+            if (isProductFilterEnabled(field)) {
+                val value = getProductFilter(field)
+                if (value.isNotEmpty()) {
+                    filters[field] = value
+                }
+            }
+        }
+
+        return filters
+    }
 }

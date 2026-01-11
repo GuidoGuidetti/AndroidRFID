@@ -1,4 +1,19 @@
 const Item = require('../models/Item');
+const Movement = require('../models/Movement');
+
+// Ottieni storico movimenti per EPC
+exports.getItemHistory = async (req, res) => {
+  const { epc } = req.params;
+  const limit = parseInt(req.query.limit) || 100;
+
+  try {
+    const history = await Movement.findHistoryByEpc(epc, limit);
+    res.json(history);
+  } catch (error) {
+    console.error('Error fetching item history:', error);
+    res.status(500).json({ error: 'Failed to fetch item history' });
+  }
+};
 
 // Ottieni tutti gli items
 exports.getAllItems = async (req, res) => {

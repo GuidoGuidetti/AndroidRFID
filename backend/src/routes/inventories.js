@@ -37,6 +37,9 @@ router.put('/:invId', inventoriesController.update);
 // PUT /api/inventories/:invId/state - Aggiorna stato inventario
 router.put('/:invId/state', inventoriesController.updateState);
 
+// PUT /api/inventories/:invId/close - Chiudi inventario (imposta stato a CLOSE)
+router.put('/:invId/close', inventoriesController.closeInventory);
+
 // POST /api/inventories/:invId/scan - Aggiungi scan a inventario
 router.post('/:invId/scan', inventoriesController.addScan);
 

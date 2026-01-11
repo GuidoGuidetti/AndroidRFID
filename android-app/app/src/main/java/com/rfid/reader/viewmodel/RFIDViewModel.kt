@@ -11,7 +11,7 @@ import com.zebra.rfid.api3.TagData
 import kotlinx.coroutines.launch
 
 class RFIDViewModel(application: Application) : AndroidViewModel(application) {
-    private val rfidManager = RFIDManager(application)
+    private val rfidManager = RFIDManager.getInstance(application)
     private val apiService = RetrofitClient.apiService
 
     private val _readerStatus = MutableLiveData<String>("Disconnesso")

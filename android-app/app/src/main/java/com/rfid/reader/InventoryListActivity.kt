@@ -42,6 +42,12 @@ class InventoryListActivity : AppCompatActivity() {
     private fun setupUI() {
         binding.btnBack.setOnClickListener { finish() }
 
+        // Pulsante Nuovo Inventario
+        binding.btnNewInventory.setOnClickListener {
+            val intent = Intent(this, NewInventoryActivity::class.java)
+            startActivityForResult(intent, REQUEST_NEW_INVENTORY)
+        }
+
         // Search functionality
         binding.etSearch.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -54,6 +60,12 @@ class InventoryListActivity : AppCompatActivity() {
 
     private fun setupRecyclerView() {
         adapter = InventoryAdapter { inventory ->
+            // Mostra dialog di connessione/caricamento
+            val progressDialog = android.app.ProgressDialog(this)
+            progressDialog.setMessage("Connecting Reader...")
+            progressDialog.setCancelable(false)
+            progressDialog.show()
+
             // Naviga alla pagina scan
             android.util.Log.d(TAG, "Opening inventory: ${inventory.inv_id}")
             val intent = Intent(this, InventoryScanActivity::class.java)
@@ -62,6 +74,17 @@ class InventoryListActivity : AppCompatActivity() {
             intent.putExtra("INVENTORY_START_DATE", inventory.inv_start_date)
             intent.putExtra("INVENTORY_COUNT", inventory.items_count)
             startActivity(intent)
+            
+            // Chiudi dialog dopo un breve ritardo per dare tempo alla transizione
+            binding.root.postDelayed({
+                try {
+                    if (progressDialog.isShowing) {
+                        progressDialog.dismiss()
+                    }
+                } catch (e: Exception) {
+                    // Ignora errori di dismiss se activity chiusa
+                }
+            }, 2000)
         }
         binding.rvInventories.layoutManager = LinearLayoutManager(this)
         binding.rvInventories.adapter = adapter
@@ -121,7 +144,7 @@ class InventoryListActivity : AppCompatActivity() {
         } else {
             allInventories.filter {
                 it.inv_name.contains(query, ignoreCase = true) ||
-                        it.inv_id.contains(query, ignoreCase = true)
+                        it.inv_id.toString().contains(query, ignoreCase = true)
             }
         }
         adapter.submitList(filtered)
@@ -138,8 +161,18 @@ class InventoryListActivity : AppCompatActivity() {
         loadInventories()
     }
 
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_NEW_INVENTORY && resultCode == RESULT_OK) {
+            Toast.makeText(this, "Inventario creato con successo", Toast.LENGTH_SHORT).show()
+            loadInventories()
+        }
+    }
+
     companion object {
         private const val TAG = "InventoryListActivity"
+        private const val REQUEST_NEW_INVENTORY = 1001
     }
 }
 

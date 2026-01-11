@@ -57,35 +57,32 @@ class Inventory {
   /**
    * Crea un nuovo inventario
    * @param {Object} invData - Dati inventario
-   * @param {string} invData.invId - Inventory ID
    * @param {string} invData.name - Nome inventario
    * @param {string} invData.note - Note
    * @param {string} invData.placeId - Place ID
-   * @param {string} invData.userId - User ID
-   * @returns {Promise<Object>} Inventario creato
+   * @returns {Promise<Object>} Inventario creato (con inv_id auto-generato)
    */
   static async create(invData) {
-    const { invId, name, note, placeId, userId } = invData;
+    const { name, note, placeId } = invData;
     const result = await pool.query(
-      `INSERT INTO "inventories" (inv_id, inv_name, inv_note, inv_place_id, inv_user)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [invId, name, note, placeId, userId]
+      `INSERT INTO "inventories" (inv_name, inv_note, inv_place_id, inv_state, inv_start_date)
+       VALUES ($1, $2, $3, 'OPEN', CURRENT_DATE) RETURNING *`,
+      [name, note, placeId]
     );
-    console.log(`Inventory '${invId}' created for place '${placeId}' by user '${userId}'`);
+    console.log(`Inventory '${result.rows[0].inv_id}' created for place '${placeId}'`);
     return result.rows[0];
   }
 
   /**
    * Aggiorna lo stato di un inventario
    * @param {string} invId - Inventory ID
-   * @param {string} state - Nuovo stato ('open' o 'closed')
+   * @param {string} state - Nuovo stato ('OPEN' o 'CLOSE')
    * @returns {Promise<Object>} Inventario aggiornato
    */
   static async updateState(invId, state) {
     const result = await pool.query(
       `UPDATE "inventories"
-       SET inv_state = $2,
-           inv_end_date = CASE WHEN $2 = 'closed' THEN NOW() ELSE inv_end_date END
+       SET inv_state = $2
        WHERE inv_id = $1 RETURNING *`,
       [invId, state]
     );

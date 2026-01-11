@@ -92,6 +92,12 @@ data class ProductResponse(
     val fld05: String?
 )
 
+data class ProductLabelResponse(
+    val pr_fld: String,
+    val pr_lab: String?,
+    val pr_des: String?
+)
+
 // Auth Models
 data class LoginRequest(
     val username: String,
@@ -119,7 +125,7 @@ data class PlaceDetails(
 
 // Inventory Models
 data class InventoryResponse(
-    val inv_id: String,
+    val inv_id: Int,
     val inv_name: String,
     val inv_note: String?,
     val inv_state: String,
@@ -129,22 +135,19 @@ data class InventoryResponse(
 )
 
 data class InventoryDetailResponse(
-    val inv_id: String,
+    val inv_id: Int,
     val inv_name: String,
     val inv_note: String?,
     val inv_state: String,
     val inv_place_id: String,
     val place_name: String?,
-    val inv_user: String,
-    val user_name: String?,
     val inv_start_date: String,
-    val inv_end_date: String?,
     val items_count: Int
 )
 
 data class InventoryItemResponse(
     val invitem_id: Int,
-    val inventory_id: String,
+    val inventory_id: Int,
     val item_epc: String,
     val scan_timestamp: String,
     val epc: String?,
@@ -157,7 +160,8 @@ data class ScanToInventoryRequest(
     val epc: String,
     val mode: String? = null,
     val placeId: String? = null,
-    val zoneId: String? = null
+    val zoneId: String? = null,
+    val productFilters: Map<String, String>? = null
 )
 
 data class ScanToInventoryResponse(
@@ -176,6 +180,45 @@ data class InventoryItemDetail(
     val fldd01: String?
 )
 
+data class ItemHistoryResponse(
+    val mov_id: Int,
+    val mov_epc: String,
+    val mov_timestamp: String,
+    val mov_dest_place: String?,
+    val mov_dest_zone: String?,
+    val place_name: String?,
+    val zone_name: String?,
+    val reference_desc: String?
+)
+
+data class CreateInventoryRequest(
+    val name: String,
+    val note: String?,
+    val placeId: String
+)
+
+data class CreateInventoryResponse(
+    val success: Boolean,
+    val inventory: InventoryResponse?,
+    val error: String?
+)
+
+data class ClearInventoryResponse(
+    val success: Boolean,
+    val message: String,
+    val itemsRemoved: Int
+)
+
+data class CloseInventoryResponse(
+    val success: Boolean,
+    val inventory: InventoryResponse?
+)
+
+data class DeleteInventoryResponse(
+    val success: Boolean,
+    val message: String
+)
+
 interface ApiService {
     // Auth Endpoints
     @POST("api/auth/login")
@@ -192,34 +235,43 @@ interface ApiService {
     suspend fun getOpenInventories(@Path("placeId") placeId: String): Response<List<InventoryResponse>>
 
     @GET("api/inventories/{invId}")
-    suspend fun getInventoryById(@Path("invId") invId: String): Response<InventoryDetailResponse>
+    suspend fun getInventoryById(@Path("invId") invId: Int): Response<InventoryDetailResponse>
 
     @GET("api/inventories/{invId}/items")
-    suspend fun getInventoryItems(@Path("invId") invId: String): Response<List<InventoryItemResponse>>
+    suspend fun getInventoryItems(@Path("invId") invId: Int): Response<List<InventoryItemResponse>>
 
     @GET("api/inventories/{invId}/items-details")
-    suspend fun getInventoryItemsDetails(@Path("invId") invId: String): Response<List<InventoryItemDetail>>
+    suspend fun getInventoryItemsDetails(@Path("invId") invId: Int): Response<List<InventoryItemDetail>>
 
     @GET("api/inventories/{invId}/count")
-    suspend fun getInventoryItemsCount(@Path("invId") invId: String): Response<Map<String, Int>>
+    suspend fun getInventoryItemsCount(@Path("invId") invId: Int): Response<Map<String, Int>>
 
     @GET("api/inventories/{invId}/stats")
-    suspend fun getInventoryStats(@Path("invId") invId: String): Response<Map<String, Any>>
+    suspend fun getInventoryStats(@Path("invId") invId: Int): Response<Map<String, Any>>
 
     @POST("api/inventories/{invId}/scan")
     suspend fun addScanToInventory(
-        @Path("invId") invId: String,
+        @Path("invId") invId: Int,
         @Body request: ScanToInventoryRequest
     ): Response<ScanToInventoryResponse>
 
     @POST("api/inventories")
-    suspend fun createInventory(@Body request: Map<String, String>): Response<Map<String, Any>>
+    suspend fun createInventory(@Body request: CreateInventoryRequest): CreateInventoryResponse
 
     @PUT("api/inventories/{invId}/state")
     suspend fun updateInventoryState(
-        @Path("invId") invId: String,
+        @Path("invId") invId: Int,
         @Body request: Map<String, String>
     ): Response<Map<String, Any>>
+
+    @DELETE("api/inventories/{invId}/items")
+    suspend fun clearInventory(@Path("invId") invId: Int): ClearInventoryResponse
+
+    @PUT("api/inventories/{invId}/close")
+    suspend fun closeInventory(@Path("invId") invId: Int): CloseInventoryResponse
+
+    @DELETE("api/inventories/{invId}")
+    suspend fun deleteInventory(@Path("invId") invId: Int): DeleteInventoryResponse
 
     // RFID Endpoints
     @POST("api/rfid/scan")
@@ -255,6 +307,9 @@ interface ApiService {
     @GET("api/items/{epc}")
     suspend fun getItemByEpc(@Path("epc") epc: String): Response<ItemResponse>
 
+    @GET("api/items/{epc}/history")
+    suspend fun getItemHistory(@Path("epc") epc: String): Response<List<ItemHistoryResponse>>
+
     @GET("api/items/place/{placeId}")
     suspend fun getItemsByPlace(@Path("placeId") placeId: String): Response<List<ItemResponse>>
 
@@ -278,6 +333,9 @@ interface ApiService {
     // Products Endpoints
     @GET("api/products")
     suspend fun getAllProducts(): Response<List<ProductResponse>>
+
+    @GET("api/products/labels")
+    suspend fun getProductLabels(): Response<List<ProductLabelResponse>>
 
     @GET("api/products/{id}")
     suspend fun getProductById(@Path("id") id: String): Response<ProductResponse>

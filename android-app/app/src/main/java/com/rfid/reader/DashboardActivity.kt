@@ -48,14 +48,18 @@ class DashboardActivity : AppCompatActivity() {
             showLogoutDialog()
         }
 
-        // Locate Tag (coming soon)
+        // Locate Tag
         binding.btnLocateTag.setOnClickListener {
-            Toast.makeText(this, "Locate Tag - Coming soon", Toast.LENGTH_SHORT).show()
+            android.util.Log.d(TAG, "Navigating to LocateActivity")
+            val intent = Intent(this, LocateActivity::class.java)
+            startActivity(intent)
         }
 
-        // Tag Info (coming soon)
+        // Tag Info
         binding.btnTagInfo.setOnClickListener {
-            Toast.makeText(this, "Tag Info - Coming soon", Toast.LENGTH_SHORT).show()
+            android.util.Log.d(TAG, "Navigating to TagInfoActivity")
+            val intent = Intent(this, TagInfoActivity::class.java)
+            startActivity(intent)
         }
 
         // Inventario - Naviga a InventoryListActivity

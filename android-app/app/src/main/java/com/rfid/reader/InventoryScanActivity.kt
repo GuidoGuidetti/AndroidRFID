@@ -1,13 +1,21 @@
 package com.rfid.reader
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
 import com.rfid.reader.databinding.ActivityInventoryScanBinding
 import com.rfid.reader.viewmodel.InventoryScanViewModel
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -17,7 +25,7 @@ import java.util.*
 class InventoryScanActivity : AppCompatActivity() {
     private lateinit var binding: ActivityInventoryScanBinding
     private lateinit var viewModel: InventoryScanViewModel
-    private var inventoryId: String = ""
+    private var inventoryId: Int = 0
     private var inventoryName: String = ""
     private var inventoryDate: String = ""
     private var existingCount: Int = 0
@@ -28,12 +36,12 @@ class InventoryScanActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         // Ricevi dati inventario da Intent
-        inventoryId = intent.getStringExtra("INVENTORY_ID") ?: ""
+        inventoryId = intent.getIntExtra("INVENTORY_ID", 0)
         inventoryName = intent.getStringExtra("INVENTORY_NAME") ?: ""
         inventoryDate = intent.getStringExtra("INVENTORY_START_DATE") ?: ""
         existingCount = intent.getIntExtra("INVENTORY_COUNT", 0)
 
-        if (inventoryId.isEmpty()) {
+        if (inventoryId == 0) {
             android.util.Log.e(TAG, "No inventory ID provided")
             Toast.makeText(this, "Errore: Inventario non specificato", Toast.LENGTH_SHORT).show()
             finish()
@@ -50,9 +58,66 @@ class InventoryScanActivity : AppCompatActivity() {
         setupObservers()
         setupListeners()
 
-        // Auto-connessione reader
-        android.util.Log.d(TAG, "Auto-connecting to RFID reader...")
-        viewModel.connectReader()
+        // Check permissions prima di connettere
+        if (checkBluetoothPermissions()) {
+            // Auto-connessione reader
+            android.util.Log.d(TAG, "Auto-connecting to RFID reader...")
+            viewModel.connectReader()
+        } else {
+            android.util.Log.d(TAG, "Requesting Bluetooth permissions...")
+            requestBluetoothPermissions()
+        }
+    }
+
+    private fun checkBluetoothPermissions(): Boolean {
+        val permissions = mutableListOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        )
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            permissions.add(Manifest.permission.BLUETOOTH_SCAN)
+            permissions.add(Manifest.permission.BLUETOOTH_CONNECT)
+        }
+
+        return permissions.all {
+            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    private fun requestBluetoothPermissions() {
+        val permissions = mutableListOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        )
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            permissions.add(Manifest.permission.BLUETOOTH_SCAN)
+            permissions.add(Manifest.permission.BLUETOOTH_CONNECT)
+        }
+
+        ActivityCompat.requestPermissions(
+            this,
+            permissions.toTypedArray(),
+            PERMISSION_REQUEST_CODE
+        )
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == PERMISSION_REQUEST_CODE) {
+            if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
+                android.util.Log.d(TAG, "Bluetooth permissions granted, connecting to reader...")
+                viewModel.connectReader()
+            } else {
+                android.util.Log.e(TAG, "Bluetooth permissions denied")
+                Toast.makeText(this, "Permessi Bluetooth necessari per usare il reader RFID", Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     private fun setupUI() {
@@ -132,13 +197,187 @@ class InventoryScanActivity : AppCompatActivity() {
         }
 
         binding.btnSettings.setOnClickListener {
-            // TODO: Aprire settings
-            Toast.makeText(this, "Settings - Coming soon", Toast.LENGTH_SHORT).show()
+            val intent = Intent(this, InventorySettingsActivity::class.java)
+            startActivity(intent)
+        }
+
+        binding.btnClearInventory.setOnClickListener {
+            android.util.Log.d(TAG, "Clear inventory button pressed")
+            showClearConfirmationDialog()
+        }
+
+        binding.btnCloseInventory.setOnClickListener {
+            android.util.Log.d(TAG, "Close inventory button pressed")
+            showCloseConfirmationDialog()
+        }
+
+        binding.btnDeleteInventory.setOnClickListener {
+            android.util.Log.d(TAG, "Delete inventory button pressed")
+            showDeleteConfirmationDialog()
         }
 
         binding.btnMenu.setOnClickListener {
             // TODO: Menu per reset contatori, chiudi inventario, etc.
             Toast.makeText(this, "Menu - Coming soon", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /**
+     * Mostra dialog di conferma per svuotare l'inventario
+     */
+    private fun showClearConfirmationDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("Svuota Inventario")
+            .setMessage("Sei sicuro di voler eliminare tutti gli item da questo inventario? Questa azione non può essere annullata.")
+            .setPositiveButton("Sì, Svuota") { _, _ ->
+                clearInventory()
+            }
+            .setNegativeButton("Annulla", null)
+            .setIcon(android.R.drawable.ic_dialog_alert)
+            .show()
+    }
+
+    /**
+     * Mostra dialog di conferma per chiudere l'inventario
+     */
+    private fun showCloseConfirmationDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("Chiudi Inventario")
+            .setMessage("Confermi di voler chiudere questo inventario? Lo stato sarà impostato a CLOSE.")
+            .setPositiveButton("Sì, Chiudi") { _, _ ->
+                closeInventory()
+            }
+            .setNegativeButton("Annulla", null)
+            .setIcon(android.R.drawable.ic_menu_close_clear_cancel)
+            .show()
+    }
+
+    /**
+     * Mostra dialog di conferma per eliminare l'inventario
+     */
+    private fun showDeleteConfirmationDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("Elimina Inventario")
+            .setMessage("ATTENZIONE: Sei sicuro di voler eliminare completamente questo inventario? Saranno eliminati l'inventario e tutti i suoi item. Questa azione non può essere annullata.")
+            .setPositiveButton("Sì, Elimina") { _, _ ->
+                deleteInventory()
+            }
+            .setNegativeButton("Annulla", null)
+            .setIcon(android.R.drawable.ic_delete)
+            .show()
+    }
+
+    /**
+     * Svuota l'inventario eliminando tutti gli items
+     */
+    private fun clearInventory() {
+        android.util.Log.d(TAG, "Clearing inventory $inventoryId")
+
+        // Disabilita pulsante durante operazione
+        binding.btnClearInventory.isEnabled = false
+        binding.btnClearInventory.text = "Clearing..."
+
+        lifecycleScope.launch {
+            try {
+                viewModel.clearInventory()
+
+                Toast.makeText(
+                    this@InventoryScanActivity,
+                    "Inventario svuotato con successo",
+                    Toast.LENGTH_SHORT
+                ).show()
+
+                android.util.Log.d(TAG, "Inventory cleared successfully")
+            } catch (e: Exception) {
+                Toast.makeText(
+                    this@InventoryScanActivity,
+                    "Errore: ${e.message}",
+                    Toast.LENGTH_LONG
+                ).show()
+                android.util.Log.e(TAG, "Error clearing inventory", e)
+            } finally {
+                // Riabilita pulsante
+                binding.btnClearInventory.isEnabled = true
+                binding.btnClearInventory.text = "CLEAR"
+            }
+        }
+    }
+
+    /**
+     * Chiude l'inventario impostando lo stato a CLOSE
+     */
+    private fun closeInventory() {
+        android.util.Log.d(TAG, "Closing inventory $inventoryId")
+
+        // Disabilita pulsanti durante operazione
+        binding.btnCloseInventory.isEnabled = false
+        binding.btnCloseInventory.text = "Closing..."
+
+        lifecycleScope.launch {
+            try {
+                viewModel.closeInventory()
+
+                Toast.makeText(
+                    this@InventoryScanActivity,
+                    "Inventario chiuso con successo",
+                    Toast.LENGTH_SHORT
+                ).show()
+
+                android.util.Log.d(TAG, "Inventory closed successfully")
+
+                // Torna alla lista inventari
+                finish()
+            } catch (e: Exception) {
+                Toast.makeText(
+                    this@InventoryScanActivity,
+                    "Errore: ${e.message}",
+                    Toast.LENGTH_LONG
+                ).show()
+                android.util.Log.e(TAG, "Error closing inventory", e)
+
+                // Riabilita pulsante
+                binding.btnCloseInventory.isEnabled = true
+                binding.btnCloseInventory.text = "CLOSE\nInventory"
+            }
+        }
+    }
+
+    /**
+     * Elimina l'inventario e tutti gli items associati
+     */
+    private fun deleteInventory() {
+        android.util.Log.d(TAG, "Deleting inventory $inventoryId")
+
+        // Disabilita pulsanti durante operazione
+        binding.btnDeleteInventory.isEnabled = false
+        binding.btnDeleteInventory.text = "Deleting..."
+
+        lifecycleScope.launch {
+            try {
+                viewModel.deleteInventory()
+
+                Toast.makeText(
+                    this@InventoryScanActivity,
+                    "Inventario eliminato con successo",
+                    Toast.LENGTH_SHORT
+                ).show()
+
+                android.util.Log.d(TAG, "Inventory deleted successfully")
+
+                // Torna alla lista inventari
+                finish()
+            } catch (e: Exception) {
+                Toast.makeText(
+                    this@InventoryScanActivity,
+                    "Errore: ${e.message}",
+                    Toast.LENGTH_LONG
+                ).show()
+                android.util.Log.e(TAG, "Error deleting inventory", e)
+
+                // Riabilita pulsante
+                binding.btnDeleteInventory.isEnabled = true
+                binding.btnDeleteInventory.text = "DELETE\nInventory"
+            }
         }
     }
 
@@ -159,5 +398,6 @@ class InventoryScanActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "InventoryScanActivity"
+        private const val PERMISSION_REQUEST_CODE = 100
     }
 }
